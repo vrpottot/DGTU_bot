@@ -75,26 +75,30 @@ async function showRasp(ctx, type, id, offset = 0) {
     const data = await res.json()
     const allLessons = data.data?.rasp
 
-    // Фильтруем только пары на нужную дату
     const [day, month, year] = date.split('.')
     const dateISO = `${year}-${month}-${day}`
     const lessons = allLessons?.filter(l => l.дата.startsWith(dateISO))
 
+    let text = ''
     if (!lessons?.length) {
-      return ctx.reply(
-        `${dayLabel} (${date}) — пар нет 🎉`,
-        navMenu(type, id, offset)
-      )
+      text = `${dayLabel} (${date}) — пар нет 🎉`
+    } else {
+      text = `📅 ${dayLabel} (${date}):\n\n`
+      lessons.forEach(l => { text += formatLesson(l) + '\n' })
     }
 
-    let text = `📅 ${dayLabel} (${date}):\n\n`
-    lessons.forEach(l => { text += formatLesson(l) + '\n' })
-    ctx.reply(text, navMenu(type, id, offset))
+    // Если вызвано кнопкой — редактируем, если первый раз — отправляем
+    try {
+      await ctx.editMessageText(text, {
+        ...navMenu(type, id, offset)
+      })
+    } catch {
+      await ctx.reply(text, navMenu(type, id, offset))
+    }
   } catch (e) {
     ctx.reply('Ошибка загрузки расписания 😢', mainMenu)
   }
 }
-
 // /start
 bot.start((ctx) => {
   ctx.reply('📅 Расписание ДГТУ\n\nВыбери тип поиска 👇', mainMenu)
