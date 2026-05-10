@@ -4,7 +4,6 @@ const http = require('http')
 const bot = new Telegraf(process.env.BOT_TOKEN)
 const API = 'https://edu.donstu.ru/api'
 
-// Хранилище состояний пользователей
 const userState = {}
 
 // Получить текущий год
@@ -13,6 +12,15 @@ async function getCurrentYear() {
   const data = await res.json()
   const years = data.data.years
   return years[years.length - 1]
+}
+
+// Сегодняшняя дата в формате DD.MM.YYYY
+function getToday() {
+  const d = new Date()
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const year = d.getFullYear()
+  return `${day}.${month}.${year}`
 }
 
 // Главное меню
@@ -64,15 +72,16 @@ bot.action(/^group_(\d+)$/, async (ctx) => {
   ctx.answerCbQuery()
   const groupId = ctx.match[1]
   try {
-    const res = await fetch(`${API}/Rasp?idGroup=${groupId}`)
+    const today = getToday()
+    const res = await fetch(`${API}/Rasp?idGroup=${groupId}&sdate=${today}`)
     const data = await res.json()
     const lessons = data.data?.rasp?.slice(0, 5)
 
     if (!lessons?.length) {
-      return ctx.reply('Расписание не найдено 😢', mainMenu)
+      return ctx.reply(`Сегодня (${today}) пар нет 🎉`, mainMenu)
     }
 
-    let text = '📅 Расписание группы (ближайшие пары):\n\n'
+    let text = `📅 Расписание на сегодня (${today}):\n\n`
     lessons.forEach(l => { text += formatLesson(l) + '\n' })
     ctx.reply(text, mainMenu)
   } catch (e) {
@@ -85,15 +94,16 @@ bot.action(/^teacher_(\d+)$/, async (ctx) => {
   ctx.answerCbQuery()
   const teacherId = ctx.match[1]
   try {
-    const res = await fetch(`${API}/Rasp?idTeacher=${teacherId}`)
+    const today = getToday()
+    const res = await fetch(`${API}/Rasp?idTeacher=${teacherId}&sdate=${today}`)
     const data = await res.json()
     const lessons = data.data?.rasp?.slice(0, 5)
 
     if (!lessons?.length) {
-      return ctx.reply('Расписание не найдено 😢', mainMenu)
+      return ctx.reply(`Сегодня (${today}) пар нет 🎉`, mainMenu)
     }
 
-    let text = '📅 Расписание преподавателя (ближайшие пары):\n\n'
+    let text = `📅 Расписание на сегодня (${today}):\n\n`
     lessons.forEach(l => { text += formatLesson(l) + '\n' })
     ctx.reply(text, mainMenu)
   } catch (e) {
@@ -106,15 +116,16 @@ bot.action(/^aud_(\d+)$/, async (ctx) => {
   ctx.answerCbQuery()
   const audId = ctx.match[1]
   try {
-    const res = await fetch(`${API}/Rasp?idAudLine=${audId}`)
+    const today = getToday()
+    const res = await fetch(`${API}/Rasp?idAudLine=${audId}&sdate=${today}`)
     const data = await res.json()
     const lessons = data.data?.rasp?.slice(0, 5)
 
     if (!lessons?.length) {
-      return ctx.reply('Расписание не найдено 😢', mainMenu)
+      return ctx.reply(`Сегодня (${today}) пар нет 🎉`, mainMenu)
     }
 
-    let text = '📅 Расписание аудитории (ближайшие пары):\n\n'
+    let text = `📅 Расписание на сегодня (${today}):\n\n`
     lessons.forEach(l => { text += formatLesson(l) + '\n' })
     ctx.reply(text, mainMenu)
   } catch (e) {
