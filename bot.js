@@ -1,12 +1,37 @@
 const { Telegraf, Markup } = require('telegraf')
 const http = require('http')
+const fs = require('fs')
 
 const bot = new Telegraf(process.env.BOT_TOKEN)
 const API = 'https://edu.donstu.ru/api'
+const DB_FILE = 'users.json'
 
+// --- База данных (JSON) ---
+function loadDB() {
+  if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, '{}')
+  return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'))
+}
+
+function saveDB(db) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2))
+}
+
+function getUser(userId) {
+  const db = loadDB()
+  if (!db[userId]) db[userId] = { favorite: null, notify: null }
+  return db[userId]
+}
+
+function saveUser(userId, data) {
+  const db = loadDB()
+  db[userId] = data
+  saveDB(db)
+}
+
+// --- Состояния ---
 const userState = {}
 
-// Получить текущий год
+// --- API ---
 async function getCurrentYear() {
   const res = await fetch(`${API}/Rasp/ListYears`)
   const data = await res.json()
@@ -14,7 +39,6 @@ async function getCurrentYear() {
   return years[years.length - 1]
 }
 
-// Дата со смещением
 function getDate(offset = 0) {
   const d = new Date()
   d.setDate(d.getDate() + offset)
@@ -24,14 +48,15 @@ function getDate(offset = 0) {
   return `${day}.${month}.${year}`
 }
 
-// Главное меню
+// --- Меню ---
 const mainMenu = Markup.inlineKeyboard([
   [Markup.button.callback('👥 По группе', 'by_group')],
   [Markup.button.callback('👨‍🏫 По преподавателю', 'by_teacher')],
-  [Markup.button.callback('🏫 По аудитории', 'by_aud')]
+  [Markup.button.callback('🏫 По аудитории', 'by_aud')],
+  [Markup.button.callback('⭐️ Избранное', 'favorite')],
+  [Markup.button.callback('🔔 Уведомления', 'notify_menu')]
 ])
 
-// Навигация по дням
 function navMenu(type, id, offset) {
   return Markup.inlineKeyboard([
     [
@@ -39,36 +64,32 @@ function navMenu(type, id, offset) {
       Markup.button.callback('След. день ▶️', `rasp_${type}_${id}_${offset + 1}`)
     ],
     [Markup.button.callback('📅 Сегодня', `rasp_${type}_${id}_0`)],
-    [Markup.button.callback('🔙 В меню', 'back')]
+    [
+      Markup.button.callback('⭐️ Сохранить', `save_${type}_${id}`),
+      Markup.button.callback('🔙 В меню', 'back')
+    ]
   ])
 }
 
-// Форматирование пары
 function formatLesson(l) {
   return (
-    `📅 ${l.дата} | ⏰ ${l.начало} - ${l.конец}\n` +
+    `⏰ ${l.начало} - ${l.конец}\n` +
     `📚 ${l.дисциплина}\n` +
     `👨‍🏫 ${l.преподаватель}\n` +
-    `🏫 Аудитория: ${l.аудитория}\n` +
-    `👥 Группа: ${l.группа}\n`
+    `🏫 ${l.аудитория}\n`
   )
 }
 
-// Универсальная функция показа расписания
+// --- Показ расписания ---
 async function showRasp(ctx, type, id, offset = 0) {
   const date = getDate(offset)
-  const paramMap = {
-    group: 'idGroup',
-    teacher: 'idTeacher',
-    aud: 'idAudLine'
-  }
+  const paramMap = { group: 'idGroup', teacher: 'idTeacher', aud: 'idAudLine' }
   const param = paramMap[type]
 
   const dayLabel =
     offset === 0 ? 'Сегодня' :
     offset === 1 ? 'Завтра' :
-    offset === -1 ? 'Вчера' :
-    date
+    offset === -1 ? 'Вчера' : date
 
   try {
     const res = await fetch(`${API}/Rasp?${param}=${id}&sdate=${date}`)
@@ -87,11 +108,8 @@ async function showRasp(ctx, type, id, offset = 0) {
       lessons.forEach(l => { text += formatLesson(l) + '\n' })
     }
 
-    // Если вызвано кнопкой — редактируем, если первый раз — отправляем
     try {
-      await ctx.editMessageText(text, {
-        ...navMenu(type, id, offset)
-      })
+      await ctx.editMessageText(text, { ...navMenu(type, id, offset) })
     } catch {
       await ctx.reply(text, navMenu(type, id, offset))
     }
@@ -99,33 +117,118 @@ async function showRasp(ctx, type, id, offset = 0) {
     ctx.reply('Ошибка загрузки расписания 😢', mainMenu)
   }
 }
-// /start
+
+// --- /start ---
 bot.start((ctx) => {
   ctx.reply('📅 Расписание ДГТУ\n\nВыбери тип поиска 👇', mainMenu)
 })
 
-// --- ГРУППЫ ---
+// --- Поиск ---
 bot.action('by_group', async (ctx) => {
   ctx.answerCbQuery()
   userState[ctx.from.id] = 'waiting_group'
   ctx.reply('🔍 Введи название группы (например: ИВТ-11):')
 })
 
-// --- ПРЕПОДАВАТЕЛИ ---
 bot.action('by_teacher', async (ctx) => {
   ctx.answerCbQuery()
   userState[ctx.from.id] = 'waiting_teacher'
   ctx.reply('🔍 Введи фамилию преподавателя (например: Иванов):')
 })
 
-// --- АУДИТОРИИ ---
 bot.action('by_aud', async (ctx) => {
   ctx.answerCbQuery()
   userState[ctx.from.id] = 'waiting_aud'
   ctx.reply('🔍 Введи номер аудитории (например: 304):')
 })
 
-// --- Расписание по кнопкам выбора ---
+// --- Избранное ---
+bot.action('favorite', async (ctx) => {
+  ctx.answerCbQuery()
+  const user = getUser(ctx.from.id)
+
+  if (!user.favorite) {
+    return ctx.reply('⭐️ У тебя нет избранного!\n\nНайди группу и нажми кнопку "⭐️ Сохранить"', mainMenu)
+  }
+
+  const { type, id, name } = user.favorite
+  await ctx.reply(`⭐️ Избранное: ${name}`)
+  await showRasp(ctx, type, id, 0)
+})
+
+// Сохранить в избранное
+bot.action(/^save_(group|teacher|aud)_(\d+)$/, async (ctx) => {
+  ctx.answerCbQuery('⭐️ Сохранено в избранное!')
+  const type = ctx.match[1]
+  const id = ctx.match[2]
+
+  // Получаем название
+  let name = id
+  try {
+    const year = await getCurrentYear()
+    const urlMap = {
+      group: `${API}/raspGrouplist?year=${year}`,
+      teacher: `${API}/raspTeacherlist?year=${year}`,
+      aud: `${API}/raspAudlist?year=${year}`
+    }
+    const res = await fetch(urlMap[type])
+    const data = await res.json()
+    const item = data.data.find(i => String(i.id) === String(id))
+    if (item) name = item.name
+  } catch {}
+
+  const user = getUser(ctx.from.id)
+  user.favorite = { type, id, name }
+  saveUser(ctx.from.id, user)
+
+  ctx.reply(`⭐️ Сохранено: ${name}\n\nТеперь можешь быстро открыть через "⭐️ Избранное" в меню!`, mainMenu)
+})
+
+// --- Уведомления ---
+bot.action('notify_menu', async (ctx) => {
+  ctx.answerCbQuery()
+  const user = getUser(ctx.from.id)
+  const status = user.notify ? `✅ Включены (${user.notify})` : '❌ Выключены'
+
+  ctx.reply(
+    `🔔 Уведомления\nСтатус: ${status}\n\nВыбери время отправки расписания:`,
+    Markup.inlineKeyboard([
+      [Markup.button.callback('7:00', 'set_notify_07:00'), Markup.button.callback('8:00', 'set_notify_08:00')],
+      [Markup.button.callback('9:00', 'set_notify_09:00'), Markup.button.callback('10:00', 'set_notify_10:00')],
+      [Markup.button.callback('❌ Отключить', 'disable_notify')],
+      [Markup.button.callback('🔙 В меню', 'back')]
+    ])
+  )
+})
+
+bot.action(/^set_notify_(.+)$/, async (ctx) => {
+  ctx.answerCbQuery()
+  const time = ctx.match[1]
+  const user = getUser(ctx.from.id)
+
+  if (!user.favorite) {
+    return ctx.reply('⚠️ Сначала сохрани группу в избранное!', mainMenu)
+  }
+
+  user.notify = time
+  saveUser(ctx.from.id, user)
+  ctx.reply(`✅ Уведомления включены!\n\nКаждый день в ${time} буду присылать расписание для: ${user.favorite.name}`, mainMenu)
+})
+
+bot.action('disable_notify', (ctx) => {
+  ctx.answerCbQuery()
+  const user = getUser(ctx.from.id)
+  user.notify = null
+  saveUser(ctx.from.id, user)
+  ctx.reply('🔕 Уведомления отключены', mainMenu)
+})
+
+// --- Навигация ---
+bot.action(/^rasp_(group|teacher|aud)_(\d+)_(-?\d+)$/, async (ctx) => {
+  ctx.answerCbQuery()
+  await showRasp(ctx, ctx.match[1], ctx.match[2], parseInt(ctx.match[3]))
+})
+
 bot.action(/^group_(\d+)$/, async (ctx) => {
   ctx.answerCbQuery()
   await showRasp(ctx, 'group', ctx.match[1], 0)
@@ -141,99 +244,43 @@ bot.action(/^aud_(\d+)$/, async (ctx) => {
   await showRasp(ctx, 'aud', ctx.match[1], 0)
 })
 
-// --- Навигация по дням ---
-bot.action(/^rasp_(group|teacher|aud)_(\d+)_(-?\d+)$/, async (ctx) => {
-  ctx.answerCbQuery()
-  const type = ctx.match[1]
-  const id = ctx.match[2]
-  const offset = parseInt(ctx.match[3])
-  await showRasp(ctx, type, id, offset)
-})
-
-// --- Назад ---
 bot.action('back', (ctx) => {
   ctx.answerCbQuery()
   userState[ctx.from.id] = null
   ctx.reply('Выбери тип поиска 👇', mainMenu)
 })
 
-// --- Обработка текстового ввода ---
+// --- Текстовый ввод ---
 bot.on('text', async (ctx) => {
   const state = userState[ctx.from.id]
   const query = ctx.message.text.toLowerCase()
 
-  // Поиск группы
-  if (state === 'waiting_group') {
-    try {
-      const year = await getCurrentYear()
-      const res = await fetch(`${API}/raspGrouplist?year=${year}`)
-      const data = await res.json()
-      const found = data.data.filter(g =>
-        g.name.toLowerCase().includes(query)
-      ).slice(0, 20)
-
-      if (!found.length) {
-        return ctx.reply('Группа не найдена 😢 Попробуй ещё раз:')
-      }
-
-      const buttons = found.map(g => [
-        Markup.button.callback(g.name, `group_${g.id}`)
-      ])
-      buttons.push([Markup.button.callback('🔙 Назад', 'back')])
-      userState[ctx.from.id] = null
-      ctx.reply('Выбери группу:', Markup.inlineKeyboard(buttons))
-    } catch (e) {
-      ctx.reply('Ошибка 😢', mainMenu)
-    }
-    return
+  const searchConfig = {
+    waiting_group: { url: 'raspGrouplist', action: 'group' },
+    waiting_teacher: { url: 'raspTeacherlist', action: 'teacher' },
+    waiting_aud: { url: 'raspAudlist', action: 'aud' }
   }
 
-  // Поиск преподавателя
-  if (state === 'waiting_teacher') {
+  const config = searchConfig[state]
+  if (config) {
     try {
       const year = await getCurrentYear()
-      const res = await fetch(`${API}/raspTeacherlist?year=${year}`)
+      const res = await fetch(`${API}/${config.url}?year=${year}`)
       const data = await res.json()
-      const found = data.data.filter(t =>
-        t.name.toLowerCase().includes(query)
+      const found = data.data.filter(i =>
+        i.name.toLowerCase().includes(query)
       ).slice(0, 20)
 
       if (!found.length) {
-        return ctx.reply('Преподаватель не найден 😢 Попробуй ещё раз:')
+        return ctx.reply('Не найдено 😢 Попробуй ещё раз:')
       }
 
-      const buttons = found.map(t => [
-        Markup.button.callback(t.name, `teacher_${t.id}`)
+      const buttons = found.map(i => [
+        Markup.button.callback(i.name, `${config.action}_${i.id}`)
       ])
       buttons.push([Markup.button.callback('🔙 Назад', 'back')])
       userState[ctx.from.id] = null
-      ctx.reply('Выбери преподавателя:', Markup.inlineKeyboard(buttons))
-    } catch (e) {
-      ctx.reply('Ошибка 😢', mainMenu)
-    }
-    return
-  }
-
-  // Поиск аудитории
-  if (state === 'waiting_aud') {
-    try {
-      const year = await getCurrentYear()
-      const res = await fetch(`${API}/raspAudlist?year=${year}`)
-      const data = await res.json()
-      const found = data.data.filter(a =>
-        a.name.toLowerCase().includes(query)
-      ).slice(0, 20)
-
-      if (!found.length) {
-        return ctx.reply('Аудитория не найдена 😢 Попробуй ещё раз:')
-      }
-
-      const buttons = found.map(a => [
-        Markup.button.callback(a.name, `aud_${a.id}`)
-      ])
-      buttons.push([Markup.button.callback('🔙 Назад', 'back')])
-      userState[ctx.from.id] = null
-      ctx.reply('Выбери аудиторию:', Markup.inlineKeyboard(buttons))
+      ctx.reply('Выбери:', Markup.inlineKeyboard(buttons))
     } catch (e) {
       ctx.reply('Ошибка 😢', mainMenu)
     }
@@ -243,7 +290,47 @@ bot.on('text', async (ctx) => {
   ctx.reply('Выбери тип поиска 👇', mainMenu)
 })
 
-// HTTP сервер для Render
+// --- Рассылка уведомлений ---
+async function sendNotifications() {
+  const db = loadDB()
+  const now = new Date()
+  const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+
+  for (const [userId, user] of Object.entries(db)) {
+    if (user.notify === currentTime && user.favorite) {
+      try {
+        const { type, id, name } = user.favorite
+        const date = getDate(0)
+        const paramMap = { group: 'idGroup', teacher: 'idTeacher', aud: 'idAudLine' }
+        const param = paramMap[type]
+
+        const res = await fetch(`${API}/Rasp?${param}=${id}&sdate=${date}`)
+        const data = await res.json()
+        const allLessons = data.data?.rasp
+
+        const [day, month, year] = date.split('.')
+        const dateISO = `${year}-${month}-${day}`
+        const lessons = allLessons?.filter(l => l.дата.startsWith(dateISO))
+
+        let text = `🔔 Расписание на сегодня (${date})\n⭐️ ${name}\n\n`
+        if (!lessons?.length) {
+          text += 'Пар нет 🎉'
+        } else {
+          lessons.forEach(l => { text += formatLesson(l) + '\n' })
+        }
+
+        await bot.telegram.sendMessage(userId, text, mainMenu)
+      } catch (e) {
+        console.log(`Ошибка уведомления для ${userId}:`, e.message)
+      }
+    }
+  }
+}
+
+// Проверяем каждую минуту
+setInterval(sendNotifications, 60 * 1000)
+
+// --- HTTP сервер ---
 const PORT = process.env.PORT || 3000
 http.createServer((req, res) => res.end('Bot is running')).listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
