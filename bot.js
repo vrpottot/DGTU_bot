@@ -220,7 +220,7 @@ bot.action(/^set_notify_(.+)$/, async (ctx) => {
   ctx.reply(`✅ Уведомления включены!\n\nКаждый день в ${time} буду присылать расписание для: ${user.favorite.name}`, mainMenu)
 })
 
-bot.action('disable_notify', (ctx) => {
+bot.action('disable_notify', async (ctx) => {
   await safeAnswer(ctx)
   const user = getUser(ctx.from.id)
   user.notify = null
@@ -248,8 +248,7 @@ bot.action(/^aud_(\d+)$/, async (ctx) => {
   await safeAnswer(ctx)
   await showRasp(ctx, 'aud', ctx.match[1], 0)
 })
-
-bot.action('back', (ctx) => {
+bot.action('back', async (ctx) => {
   await safeAnswer(ctx)
   userState[ctx.from.id] = null
   ctx.reply('Выбери тип поиска 👇', mainMenu)
