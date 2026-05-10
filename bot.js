@@ -14,9 +14,10 @@ async function getCurrentYear() {
   return years[years.length - 1]
 }
 
-// Сегодняшняя дата в формате DD.MM.YYYY
-function getToday() {
+// Дата со смещением
+function getDate(offset = 0) {
   const d = new Date()
+  d.setDate(d.getDate() + offset)
   const day = String(d.getDate()).padStart(2, '0')
   const month = String(d.getMonth() + 1).padStart(2, '0')
   const year = d.getFullYear()
@@ -30,6 +31,18 @@ const mainMenu = Markup.inlineKeyboard([
   [Markup.button.callback('🏫 По аудитории', 'by_aud')]
 ])
 
+// Навигация по дням
+function navMenu(type, id, offset) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('◀️ Пред. день', `rasp_${type}_${id}_${offset - 1}`),
+      Markup.button.callback('След. день ▶️', `rasp_${type}_${id}_${offset + 1}`)
+    ],
+    [Markup.button.callback('📅 Сегодня', `rasp_${type}_${id}_0`)],
+    [Markup.button.callback('🔙 В меню', 'back')]
+  ])
+}
+
 // Форматирование пары
 function formatLesson(l) {
   return (
@@ -39,6 +52,42 @@ function formatLesson(l) {
     `🏫 Аудитория: ${l.аудитория}\n` +
     `👥 Группа: ${l.группа}\n`
   )
+}
+
+// Универсальная функция показа расписания
+async function showRasp(ctx, type, id, offset = 0) {
+  const date = getDate(offset)
+  const paramMap = {
+    group: 'idGroup',
+    teacher: 'idTeacher',
+    aud: 'idAudLine'
+  }
+  const param = paramMap[type]
+
+  const dayLabel =
+    offset === 0 ? 'Сегодня' :
+    offset === 1 ? 'Завтра' :
+    offset === -1 ? 'Вчера' :
+    date
+
+  try {
+    const res = await fetch(`${API}/Rasp?${param}=${id}&sdate=${date}`)
+    const data = await res.json()
+    const lessons = data.data?.rasp
+
+    if (!lessons?.length) {
+      return ctx.reply(
+        `${dayLabel} (${date}) — пар нет 🎉`,
+        navMenu(type, id, offset)
+      )
+    }
+
+    let text = `📅 ${dayLabel} (${date}):\n\n`
+    lessons.forEach(l => { text += formatLesson(l) + '\n' })
+    ctx.reply(text, navMenu(type, id, offset))
+  } catch (e) {
+    ctx.reply('Ошибка загрузки расписания 😢', mainMenu)
+  }
 }
 
 // /start
@@ -67,73 +116,32 @@ bot.action('by_aud', async (ctx) => {
   ctx.reply('🔍 Введи номер аудитории (например: 304):')
 })
 
-// --- Расписание группы ---
+// --- Расписание по кнопкам выбора ---
 bot.action(/^group_(\d+)$/, async (ctx) => {
   ctx.answerCbQuery()
-  const groupId = ctx.match[1]
-  try {
-    const today = getToday()
-    const res = await fetch(`${API}/Rasp?idGroup=${groupId}&sdate=${today}`)
-    const data = await res.json()
-    const lessons = data.data?.rasp?.slice(0, 5)
-
-    if (!lessons?.length) {
-      return ctx.reply(`Сегодня (${today}) пар нет 🎉`, mainMenu)
-    }
-
-    let text = `📅 Расписание на сегодня (${today}):\n\n`
-    lessons.forEach(l => { text += formatLesson(l) + '\n' })
-    ctx.reply(text, mainMenu)
-  } catch (e) {
-    ctx.reply('Ошибка загрузки расписания 😢', mainMenu)
-  }
+  await showRasp(ctx, 'group', ctx.match[1], 0)
 })
 
-// --- Расписание преподавателя ---
 bot.action(/^teacher_(\d+)$/, async (ctx) => {
   ctx.answerCbQuery()
-  const teacherId = ctx.match[1]
-  try {
-    const today = getToday()
-    const res = await fetch(`${API}/Rasp?idTeacher=${teacherId}&sdate=${today}`)
-    const data = await res.json()
-    const lessons = data.data?.rasp?.slice(0, 5)
-
-    if (!lessons?.length) {
-      return ctx.reply(`Сегодня (${today}) пар нет 🎉`, mainMenu)
-    }
-
-    let text = `📅 Расписание на сегодня (${today}):\n\n`
-    lessons.forEach(l => { text += formatLesson(l) + '\n' })
-    ctx.reply(text, mainMenu)
-  } catch (e) {
-    ctx.reply('Ошибка загрузки расписания 😢', mainMenu)
-  }
+  await showRasp(ctx, 'teacher', ctx.match[1], 0)
 })
 
-// --- Расписание аудитории ---
 bot.action(/^aud_(\d+)$/, async (ctx) => {
   ctx.answerCbQuery()
-  const audId = ctx.match[1]
-  try {
-    const today = getToday()
-    const res = await fetch(`${API}/Rasp?idAudLine=${audId}&sdate=${today}`)
-    const data = await res.json()
-    const lessons = data.data?.rasp?.slice(0, 5)
-
-    if (!lessons?.length) {
-      return ctx.reply(`Сегодня (${today}) пар нет 🎉`, mainMenu)
-    }
-
-    let text = `📅 Расписание на сегодня (${today}):\n\n`
-    lessons.forEach(l => { text += formatLesson(l) + '\n' })
-    ctx.reply(text, mainMenu)
-  } catch (e) {
-    ctx.reply('Ошибка загрузки расписания 😢', mainMenu)
-  }
+  await showRasp(ctx, 'aud', ctx.match[1], 0)
 })
 
-// Назад
+// --- Навигация по дням ---
+bot.action(/^rasp_(group|teacher|aud)_(\d+)_(-?\d+)$/, async (ctx) => {
+  ctx.answerCbQuery()
+  const type = ctx.match[1]
+  const id = ctx.match[2]
+  const offset = parseInt(ctx.match[3])
+  await showRasp(ctx, type, id, offset)
+})
+
+// --- Назад ---
 bot.action('back', (ctx) => {
   ctx.answerCbQuery()
   userState[ctx.from.id] = null
@@ -223,7 +231,6 @@ bot.on('text', async (ctx) => {
     return
   }
 
-  // Если не ждём ввода
   ctx.reply('Выбери тип поиска 👇', mainMenu)
 })
 
