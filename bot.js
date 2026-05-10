@@ -47,7 +47,12 @@ function getDate(offset = 0) {
   const year = d.getFullYear()
   return `${day}.${month}.${year}`
 }
-
+// Безопасный ответ на callback
+async function safeAnswer(ctx, text = '') {
+  try {
+    await ctx.answerCbQuery(text)
+  } catch {}
+}
 // --- Меню ---
 const mainMenu = Markup.inlineKeyboard([
   [Markup.button.callback('👥 По группе', 'by_group')],
@@ -125,26 +130,26 @@ bot.start((ctx) => {
 
 // --- Поиск ---
 bot.action('by_group', async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   userState[ctx.from.id] = 'waiting_group'
   ctx.reply('🔍 Введи название группы (например: ИВТ-11):')
 })
 
 bot.action('by_teacher', async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   userState[ctx.from.id] = 'waiting_teacher'
   ctx.reply('🔍 Введи фамилию преподавателя (например: Иванов):')
 })
 
 bot.action('by_aud', async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   userState[ctx.from.id] = 'waiting_aud'
   ctx.reply('🔍 Введи номер аудитории (например: 304):')
 })
 
 // --- Избранное ---
 bot.action('favorite', async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   const user = getUser(ctx.from.id)
 
   if (!user.favorite) {
@@ -158,7 +163,7 @@ bot.action('favorite', async (ctx) => {
 
 // Сохранить в избранное
 bot.action(/^save_(group|teacher|aud)_(\d+)$/, async (ctx) => {
-  ctx.answerCbQuery('⭐️ Сохранено в избранное!')
+  await safeAnswer(ctx, '⭐️ Сохранено в избранное!')
   const type = ctx.match[1]
   const id = ctx.match[2]
 
@@ -186,7 +191,7 @@ bot.action(/^save_(group|teacher|aud)_(\d+)$/, async (ctx) => {
 
 // --- Уведомления ---
 bot.action('notify_menu', async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   const user = getUser(ctx.from.id)
   const status = user.notify ? `✅ Включены (${user.notify})` : '❌ Выключены'
 
@@ -202,7 +207,7 @@ bot.action('notify_menu', async (ctx) => {
 })
 
 bot.action(/^set_notify_(.+)$/, async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   const time = ctx.match[1]
   const user = getUser(ctx.from.id)
 
@@ -216,7 +221,7 @@ bot.action(/^set_notify_(.+)$/, async (ctx) => {
 })
 
 bot.action('disable_notify', (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   const user = getUser(ctx.from.id)
   user.notify = null
   saveUser(ctx.from.id, user)
@@ -225,27 +230,27 @@ bot.action('disable_notify', (ctx) => {
 
 // --- Навигация ---
 bot.action(/^rasp_(group|teacher|aud)_(\d+)_(-?\d+)$/, async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   await showRasp(ctx, ctx.match[1], ctx.match[2], parseInt(ctx.match[3]))
 })
 
 bot.action(/^group_(\d+)$/, async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   await showRasp(ctx, 'group', ctx.match[1], 0)
 })
 
 bot.action(/^teacher_(\d+)$/, async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   await showRasp(ctx, 'teacher', ctx.match[1], 0)
 })
 
 bot.action(/^aud_(\d+)$/, async (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   await showRasp(ctx, 'aud', ctx.match[1], 0)
 })
 
 bot.action('back', (ctx) => {
-  ctx.answerCbQuery()
+  await safeAnswer(ctx)
   userState[ctx.from.id] = null
   ctx.reply('Выбери тип поиска 👇', mainMenu)
 })
@@ -335,7 +340,10 @@ const PORT = process.env.PORT || 3000
 http.createServer((req, res) => res.end('Bot is running')).listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
 })
-
+// В самый конец перед bot.launch()
+bot.catch((err, ctx) => {
+  console.log('Ошибка:', err.message)
+})
 bot.launch()
 console.log('Бот запущен!')
 
