@@ -73,7 +73,12 @@ async function showRasp(ctx, type, id, offset = 0) {
   try {
     const res = await fetch(`${API}/Rasp?${param}=${id}&sdate=${date}`)
     const data = await res.json()
-    const lessons = data.data?.rasp
+    const allLessons = data.data?.rasp
+
+    // Фильтруем только пары на нужную дату
+    const [day, month, year] = date.split('.')
+    const dateISO = `${year}-${month}-${day}`
+    const lessons = allLessons?.filter(l => l.дата.startsWith(dateISO))
 
     if (!lessons?.length) {
       return ctx.reply(
